@@ -53,30 +53,131 @@ export async function compressImage(file: File, targetBytes: number): Promise<Re
 }
 
 let ffmpegInstance: import("@ffmpeg/ffmpeg").FFmpeg | null = null;
+let activeProgress: ((value: number) => void) | null = null;
+let activeDuration = 0;
+let lastProgress = 0;
+
+type VideoEncodingPlan = {
+  totalKbps: number;
+  videoKbps: number;
+  audioKbps: number;
+  fps: number;
+  maxWidth: number;
+  includeAudio: boolean;
+};
+
+const even = (value: number) => Math.max(2, Math.floor(value / 2) * 2);
+
+/**
+ * Spend the available bits on fewer, cleaner pixels instead of producing a
+ * large, blocky 30 fps frame. This matters most for reductions such as
+ * 300 MB -> 10 MB, where the available bitrate can be extremely low.
+ */
+export function getVideoEncodingPlan(
+  metadata: { duration: number; width: number; height: number },
+  targetBytes: number
+): VideoEncodingPlan {
+  const duration = Math.max(metadata.duration, 1);
+  // Leave space for MP4 headers and bitrate variation.
+  const totalKbps = Math.max(12, Math.floor((targetBytes * 8 * 0.94) / duration / 1000));
+  const includeAudio = totalKbps >= 48;
+  const audioKbps = !includeAudio ? 0 :
+    totalKbps < 100 ? 20 :
+    totalKbps < 180 ? 24 :
+    totalKbps < 300 ? 32 :
+    totalKbps < 600 ? 40 :
+    totalKbps < 1200 ? 64 :
+    totalKbps < 2400 ? 96 :
+    128;
+  const videoKbps = Math.max(12, totalKbps - audioKbps);
+  const fps =
+    videoKbps < 80 ? 10 :
+    videoKbps < 160 ? 12 :
+    videoKbps < 280 ? 15 :
+    videoKbps < 500 ? 18 :
+    videoKbps < 900 ? 24 :
+    30;
+  const bitsPerPixel =
+    videoKbps < 250 ? 0.13 :
+    videoKbps < 600 ? 0.11 :
+    videoKbps < 1200 ? 0.09 :
+    0.075;
+  const aspectRatio =
+    metadata.width > 0 && metadata.height > 0 ? metadata.width / metadata.height : 16 / 9;
+  const pixelBudget = (videoKbps * 1000) / (fps * bitsPerPixel);
+  const plannedWidth = Math.sqrt(pixelBudget * aspectRatio);
+  const sourceWidth = metadata.width > 0 ? metadata.width : 1920;
+  const maxWidth = even(Math.min(sourceWidth, 1920, Math.max(160, plannedWidth)));
+
+  return { totalKbps, videoKbps, audioKbps, fps, maxWidth, includeAudio };
+}
+
+function reportProgress(value: number) {
+  const nextValue = Math.min(0.98, Math.max(lastProgress, value));
+  lastProgress = nextValue;
+  activeProgress?.(nextValue);
+}
 
 async function getFFmpeg(onProgress: (value: number) => void) {
   const { FFmpeg } = await import("@ffmpeg/ffmpeg");
   const { toBlobURL } = await import("@ffmpeg/util");
+  activeProgress = onProgress;
+  lastProgress = 0;
+
   if (!ffmpegInstance) {
     ffmpegInstance = new FFmpeg();
-    ffmpegInstance.on("progress", ({ progress }) => onProgress(Math.min(0.98, Math.max(0, progress))));
-    const base = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd";
-    await ffmpegInstance.load({
+    ffmpegInstance.on("progress", ({ progress }) => {
+      if (Number.isFinite(progress) && progress > 0) {
+        reportProgress(0.08 + Math.min(1, progress) * 0.88);
+      }
+    });
+    ffmpegInstance.on("log", ({ message }) => {
+      const timestamp = message.match(/time=\s*(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)/);
+      if (!timestamp || activeDuration <= 0) return;
+      const seconds =
+        Number(timestamp[1]) * 3600 +
+        Number(timestamp[2]) * 60 +
+        Number(timestamp[3]);
+      if (Number.isFinite(seconds) && seconds > 0) {
+        reportProgress(0.08 + Math.min(1, seconds / activeDuration) * 0.88);
+      }
+    });
+
+    reportProgress(0.01);
+    // The single-threaded core keeps peak CPU and WASM memory use predictable.
+    // Encoding files sequentially is intentionally handled by the caller.
+    const packageName = "@ffmpeg/core";
+    const base = `https://cdn.jsdelivr.net/npm/${packageName}@0.12.10/dist/umd`;
+    const config = {
       coreURL: await toBlobURL(`${base}/ffmpeg-core.js`, "text/javascript"),
       wasmURL: await toBlobURL(`${base}/ffmpeg-core.wasm`, "application/wasm")
-    });
+    };
+
+    await ffmpegInstance.load(config);
   }
   return ffmpegInstance;
 }
 
-function videoDuration(file: File) {
-  return new Promise<number>((resolve, reject) => {
+export function releaseVideoEngine() {
+  ffmpegInstance?.terminate();
+  ffmpegInstance = null;
+  activeProgress = null;
+  activeDuration = 0;
+  lastProgress = 0;
+}
+
+function videoMetadata(file: File) {
+  return new Promise<{ duration: number; width: number; height: number }>((resolve, reject) => {
     const video = document.createElement("video");
     const url = URL.createObjectURL(file);
     video.preload = "metadata";
     video.onloadedmetadata = () => {
       URL.revokeObjectURL(url);
-      resolve(video.duration);
+      resolve({
+        duration: video.duration,
+        width: video.videoWidth,
+        height: video.videoHeight
+      });
     };
     video.onerror = () => {
       URL.revokeObjectURL(url);
@@ -92,34 +193,53 @@ export async function compressVideo(
   onProgress: (value: number) => void
 ): Promise<ResultFile> {
   const { fetchFile } = await import("@ffmpeg/util");
+  const metadata = await videoMetadata(file);
+  activeDuration = metadata.duration;
   const ffmpeg = await getFFmpeg(onProgress);
-  const duration = await videoDuration(file);
   const input = `input-${Date.now()}.${file.name.split(".").pop() || "mp4"}`;
   const output = `output-${Date.now()}.mp4`;
-  const totalKbps = Math.max(180, Math.floor((targetBytes * 8 * 0.91) / Math.max(duration, 1) / 1000));
-  const audioKbps = totalKbps > 500 ? 96 : 64;
-  const videoKbps = Math.max(120, totalKbps - audioKbps);
+  const plan = getVideoEncodingPlan(metadata, targetBytes);
+  const needsScale = metadata.width > plan.maxWidth;
+  const videoFilter = [
+    needsScale ? `scale='min(${plan.maxWidth},iw)':-2:flags=lanczos` : null,
+    `fps=${plan.fps}`
+  ].filter(Boolean).join(",");
 
-  await ffmpeg.writeFile(input, await fetchFile(file));
-  await ffmpeg.exec([
-    "-i", input,
-    "-c:v", "libx264",
-    "-preset", "veryfast",
-    "-b:v", `${videoKbps}k`,
-    "-maxrate", `${Math.round(videoKbps * 1.15)}k`,
-    "-bufsize", `${videoKbps * 2}k`,
-    "-c:a", "aac",
-    "-b:a", `${audioKbps}k`,
-    "-movflags", "+faststart",
-    output
-  ]);
-  const data = await ffmpeg.readFile(output);
-  await ffmpeg.deleteFile(input);
-  await ffmpeg.deleteFile(output);
-  const bytes = data instanceof Uint8Array ? new Uint8Array(data) : new TextEncoder().encode(data);
-  const blob = new Blob([bytes], { type: "video/mp4" });
-  onProgress(1);
-  return { blob, name: `${stem(file.name)}-shrinkly.mp4`, size: blob.size };
+  reportProgress(0.03);
+  try {
+    await ffmpeg.writeFile(input, await fetchFile(file));
+    reportProgress(0.08);
+    const audioArgs = plan.includeAudio
+      ? ["-c:a", "aac", "-b:a", `${plan.audioKbps}k`, "-ac", plan.audioKbps <= 40 ? "1" : "2"]
+      : ["-an"];
+    await ffmpeg.exec([
+      "-nostdin",
+      "-stats_period", "0.5",
+      "-i", input,
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-threads", "1",
+      "-vf", videoFilter,
+      "-b:v", `${plan.videoKbps}k`,
+      "-maxrate", `${Math.round(plan.videoKbps * 1.08)}k`,
+      "-bufsize", `${plan.videoKbps * 2}k`,
+      "-pix_fmt", "yuv420p",
+      ...audioArgs,
+      "-map_metadata", "-1",
+      "-movflags", "+faststart",
+      output
+    ]);
+    const data = await ffmpeg.readFile(output);
+    const bytes = data instanceof Uint8Array ? new Uint8Array(data) : new TextEncoder().encode(data);
+    const blob = new Blob([bytes], { type: "video/mp4" });
+    onProgress(1);
+    return { blob, name: `${stem(file.name)}-shrinkly.mp4`, size: blob.size };
+  } finally {
+    await ffmpeg.deleteFile(input).catch(() => undefined);
+    await ffmpeg.deleteFile(output).catch(() => undefined);
+    activeProgress = null;
+    activeDuration = 0;
+  }
 }
 
 export async function compressGeneric(file: File): Promise<ResultFile> {
