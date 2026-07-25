@@ -137,31 +137,6 @@ npm run build
 Next.js exports the static application to `out/`. The post-build script copies
 the same output to `dist/`.
 
-## Deploy
-
-### Vercel
-
-1. Import [`ohm41321/shrinkly-compress`](https://github.com/ohm41321/shrinkly-compress)
-   into Vercel.
-2. Keep the detected framework set to **Next.js**.
-3. Deploy.
-
-No database, secret, or environment variable is required. The committed
-`vercel.json` configures the headers needed for multi-threaded FFmpeg
-WebAssembly.
-
-### Other static hosts
-
-Deploy the contents of `out/` or `dist/` and configure these response headers:
-
-```text
-Cross-Origin-Opener-Policy: same-origin
-Cross-Origin-Embedder-Policy: credentialless
-```
-
-Without those headers the application remains functional, but video encoding
-uses the single-thread core.
-
 ## Project structure
 
 ```text

@@ -131,30 +131,6 @@ npm run build
 Next.js จะ export เว็บ Static ไปยัง `out/` และ post-build script จะคัดลอก
 ผลลัพธ์เดียวกันไปยัง `dist/`
 
-## การ Deploy
-
-### Vercel
-
-1. Import [`ohm41321/shrinkly-compress`](https://github.com/ohm41321/shrinkly-compress)
-   เข้า Vercel
-2. ใช้ Framework ที่ตรวจพบเป็น **Next.js**
-3. กด Deploy
-
-โปรเจกต์ไม่ต้องใช้ฐานข้อมูล secret หรือ environment variable และ
-`vercel.json` มี header สำหรับ FFmpeg WebAssembly แบบ multi-thread แล้ว
-
-### Static host อื่น
-
-นำไฟล์ใน `out/` หรือ `dist/` ขึ้นโฮสต์ พร้อมตั้ง response headers:
-
-```text
-Cross-Origin-Opener-Policy: same-origin
-Cross-Origin-Embedder-Policy: credentialless
-```
-
-หากไม่มี header เหล่านี้ แอปยังใช้งานได้ แต่จะเข้ารหัสวิดีโอด้วย core แบบ
-single-thread
-
 ## โครงสร้างโปรเจกต์
 
 ```text
