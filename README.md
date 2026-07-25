@@ -1,150 +1,179 @@
+<div align="center">
+
 # Shrinkly
 
-> Small files. Full quality. Zero uploads.
+### Smaller files. Smarter quality. Zero uploads.
 
-Shrinkly is a privacy-first web app for compressing images, videos, and general
-files directly in the browser. It supports batch processing and custom size
-targets, making it easy to prepare files for services with upload limits such
-as Discord.
+Privacy-first image, video, and file compression that runs entirely in your browser.
 
-**Languages:** [English](#english) · [ภาษาไทย](#ภาษาไทย)
+[![Next.js 15](https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
+[![React 19](https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+![On-device processing](https://img.shields.io/badge/processing-on--device-9ACD32)
+![No uploads](https://img.shields.io/badge/uploads-none-2E7D32)
+
+[English](README.md) · [ภาษาไทย](README.th.md)
+
+[Highlights](#highlights) · [How it works](#how-it-works) · [Quick start](#quick-start)
+
+</div>
 
 ---
 
-## English
+## Overview
 
-### About
+Shrinkly prepares files for platforms with strict upload limits—such as
+Discord's 10 MB limit—without sending the selected files to an application
+server. It combines target-aware compression with automatic device-resource
+detection to preserve as much visible detail as practical while keeping the
+browser responsive.
 
-Shrinkly reduces file sizes without sending personal files to an application
-server. Images are processed with the browser Canvas API, videos are transcoded
-with FFmpeg WebAssembly, and general files are packed into ZIP archives.
+> [!IMPORTANT]
+> Selected files remain on your device. Video compression downloads the
+> FFmpeg WebAssembly runtime from jsDelivr when first needed, but the video
+> itself is never sent to the CDN.
 
-The interface is designed to be clean, responsive, and easy to use on both
-desktop and mobile devices.
+## Highlights
 
-### Features
-
-- Drag and drop or select multiple files at once
-- Batch compression for images, videos, and general files
-- Ready-made targets for Discord (10 MB) and email (25 MB)
-- Custom target size in megabytes
-- Individual progress and result status
-- Download each result separately or download everything as one ZIP
-- English and Thai interface with a remembered language preference
-- Dark and light themes with dark mode enabled by default
-- Responsive user interface inspired by Vercel and ChatGPT
-- Local browser processing for better privacy
-- Automatic CPU/RAM detection with an adaptive 1–4 thread limit
-- Two-pass H.264 encoding with adaptive resolution, frame rate, and audio budget
-- Static Next.js export suitable for Vercel
-
-### Supported files
-
-| Type | Examples | Processing |
+| | Capability | What it provides |
 | --- | --- | --- |
-| Images | JPG, PNG, WebP | Quality search, WebP/JPEG conversion, and proportional resizing when required |
-| Videos | MP4, MOV and browser-readable formats | Two-pass H.264/AAC with adaptive bitrate, resolution, frame rate, and device resource limits |
-| Other files | Documents, archives, and general files | DEFLATE compression inside a ZIP archive |
+| 🔒 | **Private by design** | Images, videos, and files are processed locally in the browser. |
+| 🎯 | **Exact size targets** | Presets for Discord (10 MB), email (25 MB), and custom targets. |
+| ✨ | **Quality-first video** | Two-pass H.264 encoding allocates more bitrate to complex scenes. |
+| ⚙️ | **Device-aware performance** | CPU, reported memory, mobile status, and WebAssembly capabilities determine the encoding profile. |
+| 🧠 | **Adaptive media settings** | Resolution, frame rate, video bitrate, and audio budget adapt to the target. |
+| 📦 | **Batch workflow** | Queue multiple files, track each result, and download individually or as one ZIP. |
+| 🌗 | **Polished interface** | Responsive English/Thai UI with remembered language and theme preferences. |
 
-### Privacy
+## How it works
 
-Your selected files remain on your device. They are read and processed by the
-browser and are not uploaded to a Shrinkly server.
+```text
+Select files → Choose a target → Process on device → Download results
+```
 
-Video compression downloads the FFmpeg WebAssembly runtime from jsDelivr when
-it is first needed. Only the FFmpeg program files are downloaded; your video is
-not sent to the CDN.
+Shrinkly chooses a strategy based on the file type:
 
-### Important limitations
+| File type | Input examples | Compression strategy | Output |
+| --- | --- | --- | --- |
+| Images | JPG, PNG, WebP | Canvas-based quality search with progressive resizing when required | JPEG or WebP |
+| Videos | MP4, MOV, browser-readable media | Adaptive two-pass H.264/AAC encoding | MP4 |
+| Other files | Documents, archives, miscellaneous files | DEFLATE compression with JSZip | ZIP |
 
-- “No quality loss” should be understood as preserving the best practical
-  visual quality for the requested size. Re-encoding an image or video to a
-  substantially smaller target cannot be mathematically lossless.
-- A very small target may require lower image resolution, frame rate, or video
-  bitrate.
-- Video compression can take significant time and memory because FFmpeg runs
-  on the user's device. The video engine is released from memory when a batch
-  finishes.
-- Very large videos (around 1 GB or more) are constrained by browser and
-  WebAssembly memory. A native or dedicated server-side encoder remains more
-  suitable for frequent large-video workloads.
-- Files that are already compressed, such as ZIP, JPEG, MP4, or PDF files, may
-  not become smaller when packed as ZIP.
-- A result may differ slightly from the requested size because media containers
-  and codecs add overhead.
-- An internet connection is required the first time the FFmpeg runtime is
-  loaded for video processing.
+### Quality-first video pipeline
 
-### Tech stack
+1. Read the duration and dimensions from the selected video.
+2. Calculate the available video and audio bitrate from the requested size.
+3. Reduce audio to 20–96 kbps when necessary so more of the budget remains
+   available for the picture.
+4. Select an appropriate resolution and frame-rate ceiling based on the
+   available bits per pixel.
+5. Run a first pass to analyze motion and scene complexity.
+6. Run a second pass to distribute bitrate where it produces the most visible
+   benefit.
 
-- Next.js 15
-- React 19
-- TypeScript
-- FFmpeg WebAssembly
-- JSZip
-- Lucide React
-- Browser Canvas API
+The encoder never raises the frame rate above the source. Metadata is removed,
+the result uses broadly compatible H.264/AAC, and the MP4 is optimized for
+progressive playback.
 
-### Local development
+### Automatic resource profile
 
-Requirements:
+The browser exposes only approximate hardware information. Shrinkly uses what
+is available and falls back safely when a signal is unavailable.
+
+| Detected environment | Threads | Preset | Behavior |
+| --- | ---: | --- | --- |
+| Compatibility mode or limited memory | 1 | `fast` | Lowest peak load and broadest support |
+| Balanced desktop | 2–3 | `medium` | Better compression efficiency without occupying every core |
+| Powerful desktop | 4 | `slow` | Highest quality profile |
+| Mobile device | Up to 2 | `medium` or `fast` | Limits sustained CPU and memory pressure |
+
+At least half of the reported logical CPU cores remain free. Videos are
+processed sequentially, temporary pass data is removed, and the FFmpeg engine
+is released from memory after the batch finishes.
+
+> [!NOTE]
+> Multi-threaded WebAssembly requires cross-origin isolation. `vercel.json`
+> already supplies the required COOP/COEP headers for Vercel. Other hosting
+> providers must configure equivalent headers; otherwise Shrinkly
+> automatically uses the single-thread compatibility profile.
+
+## Privacy model
+
+- Selected files are not uploaded to a Shrinkly application server.
+- Image processing uses `createImageBitmap` and the browser Canvas API.
+- Video processing uses FFmpeg WebAssembly inside the browser.
+- General-file compression uses JSZip in the browser.
+- Temporary video files and two-pass logs are removed after processing.
+- The in-memory FFmpeg instance is terminated when the queue finishes.
+
+The first video operation requires an internet connection to download the
+FFmpeg runtime. Subsequent loading may be served from the browser cache.
+
+## Quick start
+
+### Requirements
 
 - Node.js 20 or newer
 - npm
+- A modern browser
 
-Install dependencies and start the development server:
+### Run locally
 
 ```bash
-npm install
+git clone https://github.com/ohm41321/shrinkly-compress.git
+cd shrinkly-compress
+npm ci
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
-Create a production build:
+### Production build
 
 ```bash
 npm run build
 ```
 
-Next.js exports the static site to `out/`. The post-build script also copies
-that exact output to `dist/`.
+Next.js exports the static application to `out/`. The post-build script copies
+the same output to `dist/`.
 
-### Deploy to Vercel
+## Deploy
 
-1. Push this project to a GitHub repository.
-2. Open the Vercel dashboard and select **Add New → Project**.
-3. Import the GitHub repository.
-4. Keep the detected framework as **Next.js**.
-5. Deploy the project.
+### Vercel
 
-No database, API key, or environment variable is required.
+1. Import [`ohm41321/shrinkly-compress`](https://github.com/ohm41321/shrinkly-compress)
+   into Vercel.
+2. Keep the detected framework set to **Next.js**.
+3. Deploy.
 
-You can also deploy with the Vercel CLI:
+No database, secret, or environment variable is required. The committed
+`vercel.json` configures the headers needed for multi-threaded FFmpeg
+WebAssembly.
 
-```bash
-npm install -g vercel
-vercel
+### Other static hosts
+
+Deploy the contents of `out/` or `dist/` and configure these response headers:
+
+```text
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: credentialless
 ```
 
-### Support and contact
+Without those headers the application remains functional, but video encoding
+uses the single-thread core.
 
-- [Donate via EasyDonate](https://easydonate.app/itsathitz)
-- Email: [athitfkm@gmail.com](mailto:athitfkm@gmail.com)
-- GitHub: [ohm41321/shrinkly-compress](https://github.com/ohm41321/shrinkly-compress)
-
-### Project structure
+## Project structure
 
 ```text
 .
 ├── app/
-│   ├── globals.css          # Global styles and responsive UI
+│   ├── globals.css          # Global styles, themes, and responsive layout
 │   ├── layout.tsx           # Root layout and metadata
-│   └── page.tsx             # Main page
+│   └── page.tsx             # Application entry page
 ├── components/
 │   └── Compressor.tsx       # Upload queue and compression interface
 ├── lib/
-│   └── compress.ts          # Image, video, ZIP, and download logic
+│   └── compress.ts          # Image, adaptive video, ZIP, and download logic
 ├── scripts/
 │   └── export-dist.mjs      # Copies the static export to dist/
 ├── next.config.mjs
@@ -153,152 +182,36 @@ vercel
 └── vercel.json
 ```
 
-### License
+## Technology
 
-No license has been specified yet. Add a `LICENSE` file before distributing or
-accepting external contributions.
+- [Next.js 15](https://nextjs.org/) and [React 19](https://react.dev/)
+- [TypeScript](https://www.typescriptlang.org/)
+- [FFmpeg WebAssembly](https://ffmpegwasm.netlify.app/)
+- [JSZip](https://stuk.github.io/jszip/)
+- [Lucide React](https://lucide.dev/)
+- Browser Canvas and Media APIs
 
----
+## Limitations
 
-## ภาษาไทย
+- A reduction such as 300 MB → 10 MB removes roughly 97% of the original file
+  size. Two-pass encoding improves allocation, but it cannot retain all
+  original detail.
+- Long or high-motion videos may require lower resolution, frame rate, or
+  bitrate to remain under the target.
+- Very large videos are constrained by browser and WebAssembly memory. A
+  native encoder is more suitable for frequent workloads around 1 GB or more.
+- Already-compressed files such as JPEG, MP4, ZIP, and PDF may not become
+  smaller when placed in a ZIP archive.
+- Container overhead and codec behavior can make the final size differ
+  slightly from the requested target.
 
-### เกี่ยวกับโปรเจกต์
+## Support
 
-Shrinkly คือเว็บแอปสำหรับลดขนาดรูปภาพ วิดีโอ และไฟล์ทั่วไปโดยประมวลผลบน
-เบราว์เซอร์ของผู้ใช้ รองรับการทำงานหลายไฟล์พร้อมกันและกำหนดขนาดเป้าหมายได้
-จึงเหมาะสำหรับเตรียมไฟล์ก่อนส่งไปยังบริการที่จำกัดขนาด เช่น Discord
+- [Support the project via EasyDonate](https://easydonate.app/itsathitz)
+- [Email](mailto:athitfkm@gmail.com)
+- [GitHub repository](https://github.com/ohm41321/shrinkly-compress)
 
-หน้าเว็บออกแบบให้สะอาด ใช้งานง่าย และรองรับทั้งคอมพิวเตอร์และโทรศัพท์มือถือ
+## License
 
-### ความสามารถ
-
-- ลากและวางหรือเลือกหลายไฟล์พร้อมกัน
-- บีบอัดรูปภาพ วิดีโอ และไฟล์ทั่วไปเป็นชุด
-- มีขนาดสำเร็จรูปสำหรับ Discord 10 MB และอีเมล 25 MB
-- กำหนดขนาดเป้าหมายเป็น MB ได้เอง
-- แสดงความคืบหน้าและผลลัพธ์แยกแต่ละไฟล์
-- ดาวน์โหลดแยกไฟล์หรือรวมผลลัพธ์ทั้งหมดเป็น ZIP
-- สลับภาษาอังกฤษและไทย พร้อมจดจำภาษาที่เลือก
-- รองรับธีมมืดและธีมสว่าง โดยใช้ธีมมืดเป็นค่าเริ่มต้น
-- UI แบบ Responsive ที่ได้แรงบันดาลใจจาก Vercel และ ChatGPT
-- ประมวลผลในเบราว์เซอร์เพื่อรักษาความเป็นส่วนตัว
-- ตรวจ CPU/RAM อัตโนมัติและปรับใช้ 1–4 threads ตามกำลังเครื่อง
-- เข้ารหัส H.264 แบบ 2-pass พร้อมปรับความละเอียด fps และงบเสียงตามเป้าหมาย
-- Export เป็นเว็บ Static พร้อมนำขึ้น Vercel
-
-### ไฟล์ที่รองรับ
-
-| ประเภท | ตัวอย่าง | วิธีประมวลผล |
-| --- | --- | --- |
-| รูปภาพ | JPG, PNG, WebP | ค้นหาค่าคุณภาพที่เหมาะสม แปลงเป็น WebP/JPEG และลดความละเอียดตามสัดส่วนเมื่อจำเป็น |
-| วิดีโอ | MP4, MOV และรูปแบบที่เบราว์เซอร์อ่านได้ | เข้ารหัส H.264/AAC แบบ 2-pass พร้อมปรับ bitrate ความละเอียด fps และทรัพยากรตามเครื่อง |
-| ไฟล์ทั่วไป | เอกสาร ไฟล์บีบอัด และไฟล์ชนิดอื่น | บีบอัดแบบ DEFLATE ภายในไฟล์ ZIP |
-
-### ความเป็นส่วนตัว
-
-ไฟล์ที่เลือกจะอยู่บนอุปกรณ์ของคุณ โดยเบราว์เซอร์จะเป็นผู้อ่านและประมวลผล
-ไฟล์เหล่านั้นจะไม่ถูกอัปโหลดไปยังเซิร์ฟเวอร์ของ Shrinkly
-
-เมื่อบีบอัดวิดีโอ ระบบจะดาวน์โหลด FFmpeg WebAssembly runtime จาก jsDelivr
-ในครั้งแรกที่ใช้งาน โดยดาวน์โหลดเฉพาะโปรแกรม FFmpeg เท่านั้น
-วิดีโอของคุณจะไม่ถูกส่งไปยัง CDN
-
-### ข้อจำกัดที่ควรทราบ
-
-- คำว่า “ไม่เสียคุณภาพ” ในที่นี้หมายถึงรักษาคุณภาพที่มองเห็นให้ดีที่สุดภายใต้
-  ขนาดที่กำหนด การลดขนาดรูปหรือวิดีโอลงมาก ๆ ไม่สามารถทำแบบ lossless
-  ในเชิงคณิตศาสตร์ได้
-- หากตั้งขนาดเป้าหมายเล็กมาก ระบบอาจต้องลดความละเอียดของรูป ลด fps หรือใช้
-  bitrate วิดีโอที่ต่ำลง
-- การบีบอัดวิดีโออาจใช้เวลาและหน่วยความจำมาก เพราะ FFmpeg ทำงานบนเครื่องผู้ใช้
-  โดยระบบจะคืนหน่วยความจำของตัวเข้ารหัสเมื่องานชุดนั้นเสร็จ
-- วิดีโอขนาดใหญ่มากประมาณ 1 GB ขึ้นไปยังติดข้อจำกัดหน่วยความจำของเบราว์เซอร์
-  และ WebAssembly หากต้องทำงานกับไฟล์ใหญ่เป็นประจำ โปรแกรม Native หรือ
-  ระบบเข้ารหัสฝั่งเซิร์ฟเวอร์จะเหมาะกว่า
-- ไฟล์ที่ถูกบีบอัดอยู่แล้ว เช่น ZIP, JPEG, MP4 หรือ PDF อาจไม่เล็กลงเมื่อใส่ ZIP
-- ขนาดผลลัพธ์อาจต่างจากเป้าหมายเล็กน้อย เนื่องจาก codec และ media container
-  มีข้อมูลประกอบเพิ่มเติม
-- การประมวลผลวิดีโอครั้งแรกต้องใช้อินเทอร์เน็ตเพื่อดาวน์โหลด FFmpeg runtime
-
-### เทคโนโลยีที่ใช้
-
-- Next.js 15
-- React 19
-- TypeScript
-- FFmpeg WebAssembly
-- JSZip
-- Lucide React
-- Browser Canvas API
-
-### วิธีรันในเครื่อง
-
-สิ่งที่ต้องมี:
-
-- Node.js 20 หรือใหม่กว่า
-- npm
-
-ติดตั้ง dependencies และเปิด development server:
-
-```bash
-npm install
-npm run dev
-```
-
-จากนั้นเปิด [http://localhost:3000](http://localhost:3000)
-
-สร้าง production build:
-
-```bash
-npm run build
-```
-
-Next.js จะ Export เว็บ Static ไปยัง `out/` และ post-build script จะคัดลอก
-ผลลัพธ์เดียวกันไปยัง `dist/`
-
-### วิธีนำขึ้น Vercel
-
-1. Push โปรเจกต์นี้ขึ้น GitHub repository ของคุณ
-2. เปิด Vercel Dashboard แล้วเลือก **Add New → Project**
-3. Import GitHub repository
-4. ใช้ Framework ที่ตรวจพบเป็น **Next.js**
-5. กด Deploy
-
-โปรเจกต์นี้ไม่ต้องใช้ฐานข้อมูล API key หรือ environment variable
-
-หากต้องการใช้ Vercel CLI:
-
-```bash
-npm install -g vercel
-vercel
-```
-
-### สนับสนุนและติดต่อ
-
-- [สนับสนุนผ่าน EasyDonate](https://easydonate.app/itsathitz)
-- Email: [athitfkm@gmail.com](mailto:athitfkm@gmail.com)
-- GitHub: [ohm41321/shrinkly-compress](https://github.com/ohm41321/shrinkly-compress)
-
-### โครงสร้างโปรเจกต์
-
-```text
-.
-├── app/
-│   ├── globals.css          # Style หลักและ Responsive UI
-│   ├── layout.tsx           # Root layout และ metadata
-│   └── page.tsx             # หน้าหลัก
-├── components/
-│   └── Compressor.tsx       # คิวไฟล์และหน้าควบคุมการบีบอัด
-├── lib/
-│   └── compress.ts          # ระบบรูป วิดีโอ ZIP และดาวน์โหลด
-├── scripts/
-│   └── export-dist.mjs      # คัดลอก Static export ไปยัง dist/
-├── next.config.mjs
-├── package.json
-├── tsconfig.json
-└── vercel.json
-```
-
-### License
-
-โปรเจกต์นี้ยังไม่ได้ระบุ License ควรเพิ่มไฟล์ `LICENSE`
-ก่อนเผยแพร่หรือเปิดรับ contribution จากบุคคลอื่น
+This repository does not currently include a license. No permission to use,
+modify, or redistribute the source is granted until a license is added.
