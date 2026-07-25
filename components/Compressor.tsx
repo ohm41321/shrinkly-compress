@@ -174,6 +174,25 @@ const formatSize = (bytes: number) => {
 const kindOf = (file: File) =>
   file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "file";
 
+let queueIdSequence = 0;
+
+const createQueueId = (file: File) => {
+  queueIdSequence += 1;
+  const cryptoApi = globalThis.crypto;
+  let uniquePart: string;
+
+  if (typeof cryptoApi?.randomUUID === "function") {
+    uniquePart = cryptoApi.randomUUID();
+  } else if (typeof cryptoApi?.getRandomValues === "function") {
+    const values = cryptoApi.getRandomValues(new Uint32Array(2));
+    uniquePart = Array.from(values, (value) => value.toString(16).padStart(8, "0")).join("");
+  } else {
+    uniquePart = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  return `${file.name}-${file.lastModified}-${queueIdSequence}-${uniquePart}`;
+};
+
 export default function Compressor() {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [targetMB, setTargetMB] = useState(10);
@@ -206,7 +225,7 @@ export default function Compressor() {
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const incoming = Array.from(files).map((file) => ({
-      id: `${file.name}-${file.lastModified}-${crypto.randomUUID()}`,
+      id: createQueueId(file),
       file,
       status: "ready" as Status,
       progress: 0
