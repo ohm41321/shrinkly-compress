@@ -56,6 +56,8 @@ let ffmpegInstance: import("@ffmpeg/ffmpeg").FFmpeg | null = null;
 let activeProgress: ((value: number) => void) | null = null;
 let activeDuration = 0;
 let lastProgress = 0;
+let progressOffset = 0.08;
+let progressScale = 0.88;
 
 type VideoEncodingPlan = {
   totalKbps: number;
@@ -66,7 +68,58 @@ type VideoEncodingPlan = {
   includeAudio: boolean;
 };
 
+export type VideoResourceProfile = {
+  logicalCores: number;
+  reportedMemoryGB: number | null;
+  threads: number;
+  preset: "fast" | "medium" | "slow";
+  useMultiThread: boolean;
+  tier: "efficient" | "balanced" | "powerful";
+};
+
 const even = (value: number) => Math.max(2, Math.floor(value / 2) * 2);
+
+export function detectVideoResources(): VideoResourceProfile {
+  if (typeof navigator === "undefined") {
+    return {
+      logicalCores: 2,
+      reportedMemoryGB: null,
+      threads: 1,
+      preset: "fast",
+      useMultiThread: false,
+      tier: "efficient"
+    };
+  }
+
+  const nav = navigator as Navigator & { deviceMemory?: number };
+  const logicalCores = Math.max(1, nav.hardwareConcurrency || 2);
+  const reportedMemoryGB =
+    typeof nav.deviceMemory === "number" && Number.isFinite(nav.deviceMemory)
+      ? nav.deviceMemory
+      : null;
+  const isolated = typeof crossOriginIsolated !== "undefined" && crossOriginIsolated;
+  const memoryAllowsThreads = reportedMemoryGB === null || reportedMemoryGB >= 4;
+  const useMultiThread = isolated && logicalCores >= 4 && memoryAllowsThreads;
+  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(nav.userAgent);
+
+  // Keep at least half of the logical cores free so the page and operating
+  // system remain responsive. Four encoder threads is the practical WASM cap:
+  // beyond this, memory pressure and synchronization overhead rise sharply.
+  const threads = useMultiThread
+    ? Math.min(isMobile ? 2 : 4, Math.max(2, Math.floor(logicalCores / 2)))
+    : 1;
+  const hasComfortableMemory = reportedMemoryGB === null || reportedMemoryGB >= 8;
+  const tier =
+    threads >= 4 && logicalCores >= 8 && hasComfortableMemory ? "powerful" :
+    threads >= 2 ? "balanced" :
+    "efficient";
+  const preset =
+    tier === "powerful" ? "slow" :
+    tier === "balanced" ? "medium" :
+    "fast";
+
+  return { logicalCores, reportedMemoryGB, threads, preset, useMultiThread, tier };
+}
 
 /**
  * Spend the available bits on fewer, cleaner pixels instead of producing a
@@ -82,13 +135,12 @@ export function getVideoEncodingPlan(
   const totalKbps = Math.max(12, Math.floor((targetBytes * 8 * 0.94) / duration / 1000));
   const includeAudio = totalKbps >= 48;
   const audioKbps = !includeAudio ? 0 :
-    totalKbps < 100 ? 20 :
-    totalKbps < 180 ? 24 :
-    totalKbps < 300 ? 32 :
-    totalKbps < 600 ? 40 :
-    totalKbps < 1200 ? 64 :
-    totalKbps < 2400 ? 96 :
-    128;
+    totalKbps < 180 ? 20 :
+    totalKbps < 350 ? 24 :
+    totalKbps < 700 ? 32 :
+    totalKbps < 1400 ? 48 :
+    totalKbps < 2800 ? 64 :
+    96;
   const videoKbps = Math.max(12, totalKbps - audioKbps);
   const fps =
     videoKbps < 80 ? 10 :
@@ -118,7 +170,19 @@ function reportProgress(value: number) {
   activeProgress?.(nextValue);
 }
 
-async function getFFmpeg(onProgress: (value: number) => void) {
+function reportEncodingProgress(value: number) {
+  reportProgress(progressOffset + Math.min(1, Math.max(0, value)) * progressScale);
+}
+
+function setProgressWindow(offset: number, scale: number) {
+  progressOffset = offset;
+  progressScale = scale;
+}
+
+async function getFFmpeg(
+  onProgress: (value: number) => void,
+  profile: VideoResourceProfile
+) {
   const { FFmpeg } = await import("@ffmpeg/ffmpeg");
   const { toBlobURL } = await import("@ffmpeg/util");
   activeProgress = onProgress;
@@ -128,7 +192,7 @@ async function getFFmpeg(onProgress: (value: number) => void) {
     ffmpegInstance = new FFmpeg();
     ffmpegInstance.on("progress", ({ progress }) => {
       if (Number.isFinite(progress) && progress > 0) {
-        reportProgress(0.08 + Math.min(1, progress) * 0.88);
+        reportEncodingProgress(progress);
       }
     });
     ffmpegInstance.on("log", ({ message }) => {
@@ -139,20 +203,25 @@ async function getFFmpeg(onProgress: (value: number) => void) {
         Number(timestamp[2]) * 60 +
         Number(timestamp[3]);
       if (Number.isFinite(seconds) && seconds > 0) {
-        reportProgress(0.08 + Math.min(1, seconds / activeDuration) * 0.88);
+        reportEncodingProgress(seconds / activeDuration);
       }
     });
 
     reportProgress(0.01);
-    // The single-threaded core keeps peak CPU and WASM memory use predictable.
-    // Encoding files sequentially is intentionally handled by the caller.
-    const packageName = "@ffmpeg/core";
+    const packageName = profile.useMultiThread ? "@ffmpeg/core-mt" : "@ffmpeg/core";
     const base = `https://cdn.jsdelivr.net/npm/${packageName}@0.12.10/dist/umd`;
-    const config = {
+    const config: {
+      coreURL: string;
+      wasmURL: string;
+      workerURL?: string;
+    } = {
       coreURL: await toBlobURL(`${base}/ffmpeg-core.js`, "text/javascript"),
       wasmURL: await toBlobURL(`${base}/ffmpeg-core.wasm`, "application/wasm")
     };
 
+    if (profile.useMultiThread) {
+      config.workerURL = await toBlobURL(`${base}/ffmpeg-core.worker.js`, "text/javascript");
+    }
     await ffmpegInstance.load(config);
   }
   return ffmpegInstance;
@@ -164,6 +233,8 @@ export function releaseVideoEngine() {
   activeProgress = null;
   activeDuration = 0;
   lastProgress = 0;
+  progressOffset = 0.08;
+  progressScale = 0.88;
 }
 
 function videoMetadata(file: File) {
@@ -195,14 +266,17 @@ export async function compressVideo(
   const { fetchFile } = await import("@ffmpeg/util");
   const metadata = await videoMetadata(file);
   activeDuration = metadata.duration;
-  const ffmpeg = await getFFmpeg(onProgress);
-  const input = `input-${Date.now()}.${file.name.split(".").pop() || "mp4"}`;
-  const output = `output-${Date.now()}.mp4`;
+  const profile = detectVideoResources();
+  const ffmpeg = await getFFmpeg(onProgress, profile);
+  const jobId = Date.now();
+  const input = `input-${jobId}.${file.name.split(".").pop() || "mp4"}`;
+  const output = `output-${jobId}.mp4`;
+  const passLog = `passlog-${jobId}`;
   const plan = getVideoEncodingPlan(metadata, targetBytes);
   const needsScale = metadata.width > plan.maxWidth;
   const videoFilter = [
     needsScale ? `scale='min(${plan.maxWidth},iw)':-2:flags=lanczos` : null,
-    `fps=${plan.fps}`
+    `fps='min(source_fps,${plan.fps})'`
   ].filter(Boolean).join(",");
 
   reportProgress(0.03);
@@ -212,18 +286,40 @@ export async function compressVideo(
     const audioArgs = plan.includeAudio
       ? ["-c:a", "aac", "-b:a", `${plan.audioKbps}k`, "-ac", plan.audioKbps <= 40 ? "1" : "2"]
       : ["-an"];
+    const videoArgs = [
+      "-c:v", "libx264",
+      "-preset", profile.preset,
+      "-threads", `${profile.threads}`,
+      "-vf", videoFilter,
+      "-b:v", `${plan.videoKbps}k`,
+      "-pix_fmt", "yuv420p"
+    ];
+
+    // Pass 1 only writes analysis statistics. The null muxer avoids keeping a
+    // redundant first-pass video in browser memory.
+    setProgressWindow(0.08, 0.40);
     await ffmpeg.exec([
       "-nostdin",
       "-stats_period", "0.5",
       "-i", input,
-      "-c:v", "libx264",
-      "-preset", "veryfast",
-      "-threads", "1",
-      "-vf", videoFilter,
-      "-b:v", `${plan.videoKbps}k`,
-      "-maxrate", `${Math.round(plan.videoKbps * 1.08)}k`,
-      "-bufsize", `${plan.videoKbps * 2}k`,
-      "-pix_fmt", "yuv420p",
+      ...videoArgs,
+      "-pass", "1",
+      "-passlogfile", passLog,
+      "-an",
+      "-map_metadata", "-1",
+      "-f", "null",
+      "-"
+    ]);
+    reportProgress(0.50);
+
+    setProgressWindow(0.50, 0.48);
+    await ffmpeg.exec([
+      "-nostdin",
+      "-stats_period", "0.5",
+      "-i", input,
+      ...videoArgs,
+      "-pass", "2",
+      "-passlogfile", passLog,
       ...audioArgs,
       "-map_metadata", "-1",
       "-movflags", "+faststart",
@@ -237,8 +333,11 @@ export async function compressVideo(
   } finally {
     await ffmpeg.deleteFile(input).catch(() => undefined);
     await ffmpeg.deleteFile(output).catch(() => undefined);
+    await ffmpeg.deleteFile(`${passLog}-0.log`).catch(() => undefined);
+    await ffmpeg.deleteFile(`${passLog}-0.log.mbtree`).catch(() => undefined);
     activeProgress = null;
     activeDuration = 0;
+    setProgressWindow(0.08, 0.88);
   }
 }
 

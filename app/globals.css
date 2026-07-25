@@ -204,6 +204,20 @@ h2 { margin: 0 0 4px; font-size: 17px; letter-spacing: -.25px; }
 .quality-notice strong { display: block; font-size: 12px; }
 .resource-notice p,
 .quality-notice p { margin: 4px 0 0; color: #7a8065; font-size: 11px; line-height: 1.55; }
+.resource-profile {
+  width: fit-content;
+  margin-top: 9px;
+  padding: 5px 8px;
+  display: block;
+  border: 1px solid #d8e5b7;
+  border-radius: 6px;
+  background: rgba(255,255,255,.55);
+  color: #647044;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.4;
+}
 .resource-badge {
   width: fit-content;
   margin: 0 0 7px;
@@ -428,6 +442,11 @@ footer .brand-mark span { width: 8px; height: 8px; }
   color: #b6df51;
 }
 [data-theme="dark"] .resource-notice p { color: #8f9a76; }
+[data-theme="dark"] .resource-profile {
+  border-color: #3d4b25;
+  background: rgba(8,10,7,.35);
+  color: #a5b585;
+}
 [data-theme="dark"] .resource-notice.active {
   border-color: #66842c;
   box-shadow: 0 0 0 3px rgba(157,206,38,.08);

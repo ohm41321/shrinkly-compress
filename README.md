@@ -34,8 +34,8 @@ desktop and mobile devices.
 - Dark and light themes with dark mode enabled by default
 - Responsive user interface inspired by Vercel and ChatGPT
 - Local browser processing for better privacy
-- Resource-saving FFmpeg limited to one CPU thread and one video at a time
-- Adaptive video resolution and frame rate for cleaner extreme reductions
+- Automatic CPU/RAM detection with an adaptive 1–4 thread limit
+- Two-pass H.264 encoding with adaptive resolution, frame rate, and audio budget
 - Static Next.js export suitable for Vercel
 
 ### Supported files
@@ -43,7 +43,7 @@ desktop and mobile devices.
 | Type | Examples | Processing |
 | --- | --- | --- |
 | Images | JPG, PNG, WebP | Quality search, WebP/JPEG conversion, and proportional resizing when required |
-| Videos | MP4, MOV and browser-readable formats | H.264/AAC transcoding with a bitrate calculated from the target size |
+| Videos | MP4, MOV and browser-readable formats | Two-pass H.264/AAC with adaptive bitrate, resolution, frame rate, and device resource limits |
 | Other files | Documents, archives, and general files | DEFLATE compression inside a ZIP archive |
 
 ### Privacy
@@ -182,8 +182,8 @@ Shrinkly คือเว็บแอปสำหรับลดขนาดร�
 - รองรับธีมมืดและธีมสว่าง โดยใช้ธีมมืดเป็นค่าเริ่มต้น
 - UI แบบ Responsive ที่ได้แรงบันดาลใจจาก Vercel และ ChatGPT
 - ประมวลผลในเบราว์เซอร์เพื่อรักษาความเป็นส่วนตัว
-- ใช้ FFmpeg แบบประหยัดทรัพยากร จำกัด CPU 1 thread และทำทีละวิดีโอ
-- ปรับความละเอียดและ fps ตามขนาดเป้าหมายเพื่อให้ภาพแตกน้อยลง
+- ตรวจ CPU/RAM อัตโนมัติและปรับใช้ 1–4 threads ตามกำลังเครื่อง
+- เข้ารหัส H.264 แบบ 2-pass พร้อมปรับความละเอียด fps และงบเสียงตามเป้าหมาย
 - Export เป็นเว็บ Static พร้อมนำขึ้น Vercel
 
 ### ไฟล์ที่รองรับ
@@ -191,7 +191,7 @@ Shrinkly คือเว็บแอปสำหรับลดขนาดร�
 | ประเภท | ตัวอย่าง | วิธีประมวลผล |
 | --- | --- | --- |
 | รูปภาพ | JPG, PNG, WebP | ค้นหาค่าคุณภาพที่เหมาะสม แปลงเป็น WebP/JPEG และลดความละเอียดตามสัดส่วนเมื่อจำเป็น |
-| วิดีโอ | MP4, MOV และรูปแบบที่เบราว์เซอร์อ่านได้ | แปลงเป็น H.264/AAC และคำนวณ bitrate จากขนาดเป้าหมาย |
+| วิดีโอ | MP4, MOV และรูปแบบที่เบราว์เซอร์อ่านได้ | เข้ารหัส H.264/AAC แบบ 2-pass พร้อมปรับ bitrate ความละเอียด fps และทรัพยากรตามเครื่อง |
 | ไฟล์ทั่วไป | เอกสาร ไฟล์บีบอัด และไฟล์ชนิดอื่น | บีบอัดแบบ DEFLATE ภายในไฟล์ ZIP |
 
 ### ความเป็นส่วนตัว

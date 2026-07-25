@@ -6,7 +6,8 @@ import {
   Mail, Menu, Moon, Plus, ShieldCheck, Sparkles, Sun, Trash2, UploadCloud, Video, X, Zap
 } from "lucide-react";
 import {
-  compressGeneric, compressImage, compressVideo, downloadAll, downloadBlob, releaseVideoEngine, type ResultFile
+  compressGeneric, compressImage, compressVideo, detectVideoResources, downloadAll, downloadBlob,
+  releaseVideoEngine, type ResultFile, type VideoResourceProfile
 } from "@/lib/compress";
 
 type Status = "ready" | "compressing" | "done" | "error";
@@ -52,11 +53,13 @@ const copy = {
     addFiles: "Add more files",
     target: "Set a target size",
     targetHint: "per file · perfect for platform upload limits",
-    resourceMode: "Resource saver on",
+    resourceMode: "Highest quality · 2-pass",
     resourceTitle: "Video compression uses your device",
-    resourceText: "CPU, memory, and battery usage may increase while processing. Resource saver uses one CPU thread, processes one video at a time, and releases the video engine from memory when the batch finishes.",
+    resourceText: "Shrinkly detects this device automatically, keeps at least half of its logical CPU cores free, and processes one video at a time. CPU, memory, and battery usage will increase during two-pass encoding.",
+    resourceDetecting: "Detecting available CPU and memory...",
+    resourceSingleThread: "Single-thread compatibility mode",
     qualityTitle: "Extreme size reduction",
-    qualityText: "This target removes over 90% of the original size. Shrinkly will lower resolution and frame rate before starving every frame of detail, but the result cannot retain the original quality. Raise the target size for a clearer result.",
+    qualityText: "This target removes over 90% of the original size. Two-pass encoding analyzes motion first, gives more bitrate to complex scenes, and reduces audio bitrate to preserve the clearest possible picture within the limit.",
     safe: "Your files stay private",
     safeHint: "Processed locally, never sent to a server",
     downloadAll: "Download all",
@@ -69,7 +72,8 @@ const copy = {
     largeWarning: "Large video — processing can take a while. Keep this tab open.",
     loadingEngine: "Loading the compression engine",
     preparingFile: "Preparing the file in memory",
-    encodingVideo: "Encoding video — keep this tab open",
+    analyzingVideo: "Pass 1/2 · analyzing motion and scenes",
+    encodingVideo: "Pass 2/2 · encoding the final video",
     optimizing: "Optimizing on your device",
     genericError: "Something went wrong",
     featurePrivate: "Truly private",
@@ -119,11 +123,13 @@ const copy = {
     addFiles: "เพิ่มไฟล์",
     target: "กำหนดขนาดเป้าหมาย",
     targetHint: "ต่อไฟล์ · เหมาะกับข้อจำกัดของแพลตฟอร์ม",
-    resourceMode: "เปิดโหมดประหยัดทรัพยากร",
+    resourceMode: "คุณภาพสูงสุด · 2-pass",
     resourceTitle: "การบีบอัดวิดีโอใช้ทรัพยากรเครื่องของคุณ",
-    resourceText: "ระหว่างทำงานอาจใช้ CPU, RAM และแบตเตอรี่มากขึ้น โหมดประหยัดจะใช้ CPU 1 thread ทำทีละวิดีโอ และคืนหน่วยความจำของระบบวิดีโอเมื่องานชุดนี้เสร็จ",
+    resourceText: "Shrinkly ตรวจสเปกเครื่องนี้อัตโนมัติ เว้น logical CPU cores ไว้อย่างน้อยครึ่งหนึ่ง และทำทีละวิดีโอ ระหว่างเข้ารหัส 2 รอบจะใช้ CPU, RAM และแบตเตอรี่มากขึ้น",
+    resourceDetecting: "กำลังตรวจ CPU และ RAM ที่ใช้งานได้...",
+    resourceSingleThread: "โหมดเข้ากันได้แบบ 1 thread",
     qualityTitle: "กำลังลดขนาดอย่างหนัก",
-    qualityText: "เป้าหมายนี้ลดจากต้นฉบับมากกว่า 90% ระบบจะลดความละเอียดและ fps ก่อนเพื่อไม่ให้ทุกเฟรมแตกเป็นบล็อก แต่ไม่สามารถคงคุณภาพเดิมทั้งหมดได้ หากต้องการภาพชัดขึ้นควรเพิ่มขนาดเป้าหมาย",
+    qualityText: "เป้าหมายนี้ลดจากต้นฉบับมากกว่า 90% ระบบ 2-pass จะวิเคราะห์การเคลื่อนไหวก่อน เพิ่ม bitrate ให้ฉากซับซ้อน และลด bitrate เสียงเพื่อรักษาภาพให้ชัดที่สุดภายในขนาดที่กำหนด",
     safe: "ไฟล์ของคุณปลอดภัย",
     safeHint: "ประมวลผลบนเครื่อง ไม่ผ่านเซิร์ฟเวอร์",
     downloadAll: "ดาวน์โหลดทั้งหมด",
@@ -136,7 +142,8 @@ const copy = {
     largeWarning: "วิดีโอขนาดใหญ่ อาจใช้เวลาสักครู่ กรุณาเปิดหน้านี้ไว้",
     loadingEngine: "กำลังโหลดระบบบีบอัด",
     preparingFile: "กำลังเตรียมไฟล์ในหน่วยความจำ",
-    encodingVideo: "กำลังเข้ารหัสวิดีโอ กรุณาเปิดหน้านี้ไว้",
+    analyzingVideo: "รอบ 1/2 · กำลังวิเคราะห์การเคลื่อนไหวและฉาก",
+    encodingVideo: "รอบ 2/2 · กำลังเข้ารหัสวิดีโอผลลัพธ์",
     optimizing: "กำลังประมวลผลบนอุปกรณ์ของคุณ",
     genericError: "เกิดข้อผิดพลาด",
     featurePrivate: "เป็นส่วนตัวจริง",
@@ -174,6 +181,7 @@ export default function Compressor() {
   const [working, setWorking] = useState(false);
   const [language, setLanguage] = useState<Language>("en");
   const [theme, setTheme] = useState<Theme>("dark");
+  const [videoProfile, setVideoProfile] = useState<VideoResourceProfile | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const t = copy[language];
 
@@ -182,6 +190,7 @@ export default function Compressor() {
     const savedTheme = localStorage.getItem("shrinkly-theme");
     if (savedLanguage === "en" || savedLanguage === "th") setLanguage(savedLanguage);
     if (savedTheme === "dark" || savedTheme === "light") setTheme(savedTheme);
+    setVideoProfile(detectVideoResources());
   }, []);
 
   useEffect(() => {
@@ -253,6 +262,11 @@ export default function Compressor() {
   const hasExtremeVideoReduction = items.some(
     (item) => kindOf(item.file) === "video" && item.file.size > targetBytes * 10
   );
+  const resourceProfileText = videoProfile
+    ? language === "th"
+      ? `ตรวจพบ ${videoProfile.logicalCores} logical cores${videoProfile.reportedMemoryGB ? ` · RAM ที่รายงาน ${videoProfile.reportedMemoryGB} GB` : ""} · ใช้ ${videoProfile.threads} threads · preset ${videoProfile.preset}`
+      : `Detected ${videoProfile.logicalCores} logical cores${videoProfile.reportedMemoryGB ? ` · ${videoProfile.reportedMemoryGB} GB reported RAM` : ""} · using ${videoProfile.threads} threads · ${videoProfile.preset} preset`
+    : t.resourceDetecting;
 
   return (
     <main>
@@ -349,6 +363,7 @@ export default function Compressor() {
               const progressLabel =
                 kind === "video" && item.progress < 0.03 ? t.loadingEngine :
                 kind === "video" && item.progress < 0.08 ? t.preparingFile :
+                kind === "video" && item.progress < 0.50 ? t.analyzingVideo :
                 kind === "video" ? t.encodingVideo :
                 t.optimizing;
               const saving = item.result
@@ -464,6 +479,11 @@ export default function Compressor() {
               <span className="resource-badge"><Leaf size={12} /> {t.resourceMode}</span>
               <strong>{t.resourceTitle}</strong>
               <p>{t.resourceText}</p>
+              <span className="resource-profile">
+                {videoProfile && !videoProfile.useMultiThread
+                  ? `${resourceProfileText} · ${t.resourceSingleThread}`
+                  : resourceProfileText}
+              </span>
             </div>
           </div>
         )}
